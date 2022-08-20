@@ -1,0 +1,267 @@
+---
+title: "Naive Bayes Classifier"
+author: 'Ion Bueno Ulacia, NIA: 100364530'
+output: html_document
+---
+
+
+## a) Data Introduction
+
+The dataset employed is The Stanford Sentiment Treebank, known as **SST-2** (https://nlp.stanford.edu/sentiment/) and it can be downloaded in https://gluebenchmark.com/tasks. The data is already split into training, validation and test sets, but as there are enough samples as training data, only this partition is used for the exercise. It is composed by movie reviews written in English.
+
+This dataset is used in **sentiment analysis**, which means differentiating between positive and negative sentiments. It is one of the benchmarks of GLUE (General Language Understanding Evaluation).
+
+The data is composed by sentences with a label indicating the corresponding sentiment, 1 for positive and 0 for negative. Mention that the original name of the columns, *sentence* and *label*, are renamed by *text* and *type* respectively.
+
+First step is loading the data from the local store.
+
+```{r data}
+setwd("~/UC3M/3º SEMI-TERM/Bayesian learning/Assignments/1. Naive Bayes Classifier")
+sst2 <- read.csv(file = 'sst2.tsv', sep = '\t', header = TRUE)
+dim(sst2)
+```
+
+
+As there are many samples, **67.349**, in order to avoid memory problems, the data is reduced to **8.000**.
+
+```{r resize data}
+n_samples <- 8000
+set.seed(123)
+idx <- sample(seq_len(nrow(sst2)), size = n_samples)
+sst2 <- sst2[idx, ]
+dim(sst2)
+```
+
+
+It is important to check if there are enough samples of both classes.
+
+```{r balance after resize}
+table(sst2$type)
+```
+
+The problem is still balanced.
+
+
+
+
+## b) Type of Messages
+
+As it has been commented before, the data is composed by two types of messages, positive and negative. The **positive** sentiment correspond with label or type **1**.
+
+```{r pos msg}
+sst2[(sst2$type == 1), 1][1:5]
+```
+
+And the **negative** sentiment with label **0**.
+
+```{r neg msg}
+sst2[(sst2$type == 0), 1][1:5]
+```
+
+
+## c) Data Cleaning
+
+In order to preprocess the data, it is used the package \texttt{tm}.
+
+```{r library}
+library(tm)
+```
+The samples are stored in a corpus.
+
+```{r corpus}
+corpus <- Corpus(VectorSource(sst2$text))
+inspect(corpus[1:3])
+```
+The preprocessing or cleaning data process consists on:
+
+* Translate all letters to lower case, to reduce the number of possible words and make no distinction between the same word with or without capital letter.
+
+* Remove numbers, since they are not meaningful for sentiment analysis.
+
+* Remove punctuation.
+
+* Remove common non-content words using the returned list from \texttt{stopwords} function. 
+
+* Remove the excess white space.
+
+```{r cleaning, warning=FALSE}
+clean_corpus <- tm_map(corpus, tolower)
+clean_corpus <- tm_map(clean_corpus, removeNumbers)
+clean_corpus <- tm_map(clean_corpus, removePunctuation)
+clean_corpus <- tm_map(clean_corpus, removeWords,
+                       stopwords("en"))
+clean_corpus <- tm_map(clean_corpus, stripWhitespace)
+```
+
+
+
+## d) Wordclouds
+
+First step is obtaining the indices for both classes.
+
+```{r labels}
+positive_indices <- which(sst2$type == 1)
+negative_indices <- which(sst2$type == 0)
+```
+
+
+And then call to the function \texttt{wordcloud}. First the words corresponding to the **positive** class.
+
+```{r wordcloud positive, message=FALSE}
+library(wordcloud)
+wordcloud(clean_corpus[positive_indices], min.freq=30, scale=c(3,.5))
+```
+
+As expected, there are some words related with a positive sentiment as *funny*, *best*, *good*, etc. 
+
+In next cell the sentences corresponding to the **negative** class are used.
+
+```{r wordcloud negative, message=FALSE}
+wordcloud(clean_corpus[negative_indices], min.freq=30, scale=c(3,.5))
+```
+
+In this case we can see *bad* as a very frequent word, but there are not many more words related with a negative sentiment, unlike before. 
+
+Mention that in both cases the most common words are related with the movies vocabulary, as *movie*, *film* or *characters*, and there are not a lot of differences between the most frequent words in both wordclouds. 
+
+
+
+## e) Training and Test set
+
+Next step is splitting the preprocessed data into training and test set. It is used 75% of the whole data as training and the rest for testing.
+
+```{r splitting}
+smp_size <- floor(0.75 * nrow(sst2))
+set.seed(123)
+train_ind <- sample(seq_len(nrow(sst2)), size = smp_size)
+sst2_train <- sst2[train_ind, ]
+sst2_test <- sst2[-train_ind, ]
+corpus_train <- clean_corpus[train_ind]
+corpus_test <- clean_corpus[-train_ind]
+```
+
+
+Again, the balance between classes is checked in both sets.
+
+```{r balance splitting}
+table(sst2_train$type)
+table(sst2_test$type)
+```
+
+As it can be seen, there is no problem.
+
+
+## f) Naive Bayes analysis
+
+### Processing
+
+To prepare the data for the classifier, it is created a sparse matrix data structure in which
+the rows of the matrix refer to document and the columns refer to words. The matrix is split according to the previous partition indexes.
+
+```{r sparse matrix}
+sst2_dtm <- DocumentTermMatrix(clean_corpus)
+sst2_dtm_train <- sst2_dtm[train_ind, ]
+sst2_dtm_test <- sst2_dtm[-train_ind, ]
+```
+
+
+Words which do not appear at least 5 times are removed, since it could be carry negative effects in the training of the classifier. Mention the counting is only in the training partition, while the words are removed in both sets.
+
+```{r rep words}
+rep_times <- 5
+rep_times_words <- findFreqTerms(sst2_dtm_train, rep_times)
+length(rep_times_words)
+```
+
+A total of 1378 words have been removed and the sparse matrices are updated.
+
+```{r document term}
+sst2_dtm_train <- DocumentTermMatrix(corpus_train,
+                                    control=list(dictionary = rep_times_words))
+sst2_dtm_test <- DocumentTermMatrix(corpus_test,
+                                   control=list(dictionary = rep_times_words))
+```
+
+
+Naive Bayes classification needs present or absent info on each word in a message. For this reason next function is used to perform this encoding.
+
+```{r words appearing}
+convert_count <- function(x){
+  y <- ifelse(x > 0, 1,0)
+  y <- factor(y, levels=c(0,1), labels=c("No", "Yes"))
+  return(y)
+}
+sst2_dtm_train <- apply(sst2_dtm_train, 2, convert_count)
+sst2_dtm_test <- apply(sst2_dtm_test, 2, convert_count)
+```
+
+
+### Classifier
+
+Finally, a Naive Bayes classifier is used, using the package \texttt{e1071}. The training process is performed using the function \texttt{naiveBayes} with the training data, the sparse matrix and true labels.
+
+```{r classifier}
+library(e1071)
+classifier <- naiveBayes(sst2_dtm_train, sst2_train$type)
+```
+
+
+## g) Results
+
+After the training process, the classifier can make predictions over new sentences.
+
+
+### Training
+
+First step is looking into the performance respect the training data. For this purpose, the confusion matrix is shown in next cell.
+
+```{r train pred, warning=FALSE}
+train_pred <- predict(classifier, newdata=sst2_dtm_train)
+table(train_pred, sst2_train$type)
+```
+
+It is obtained an accuracy of **0.79**. As it is shown, the classifier struggles classifying the negative sentiment (label 0), with an accuracy of 0.66 respect the 0.88 obtained for the positive sentences.
+
+
+### Test
+
+Now, the predictions are over the test set.
+
+```{r test pred, warning=FALSE}
+test_pred <- predict(classifier, newdata=sst2_dtm_test)
+table(test_pred, sst2_test$type)
+```
+
+In this case, the accuracy is **0.72**. As it is normal, the value is smaller than with the training set, but they are close, so it is a sign the model generalizes well and there is not overfitting. In this case there is the same problem than with the training set respect the classification of the negative sentences. The classifier predicts better the positive sentences. 
+
+It could be a consequence of what has been commented in the negative sentiment wordcloud. Most of the frequent words which appear in the negative class are also common for the positive, whereas this one has many important words which are not common.
+
+
+
+## h) Laplace smoothing
+
+Now it is applied the Laplace smoothing.
+
+```{r laplacian smoothing, warning=FALSE}
+B.clas <- naiveBayes(sst2_dtm_train, sst2_train$type,laplace = 1)
+B.preds <- predict(B.clas, newdata=sst2_dtm_test)
+table(B.preds, sst2_test$type)
+```
+
+As expected the performance is slightly better, it is obtained **0.73** of accuracy, while before the value was **0.72**.
+
+
+## i) Conclusions and possible improvements
+
+As it has been commented before, the obtained accuracy in the test set is not very large, so it is likely not being the best model for this dataset, at least with the selected amount of samples. In spite of that, it is a considerable method, since it is simple and really fast compared with other models which can be applied in this problem, for example a recurrent neural network.
+
+Some improvements could be applied in order to improve the performance of the classifier:
+
+The Naive Bayes algorithm takes a lot of resources. For this reason, selecting the features of the message text in the practical application will reduce the dimension of the features vector space. This selection could be applied by means of correlation between words, so it avoids redundancy.
+
+In addition to this, using more data helps to generalize better at least with this dataset, since adding more samples improved the accuracy of the model.
+
+Finally, it was commented that the classifier struggles classifying the negative class. For this reason, changing the threshold, for example a sentence is classified as negative only if the probability is bigger than 0.7 rather than 0.5, would improve the performance. The ROC curve could be applied to find the optimal threshold.
+
+
+

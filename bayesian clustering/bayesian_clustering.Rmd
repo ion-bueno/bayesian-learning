@@ -1,0 +1,185 @@
+---
+title: "Open Project - Bayesian Clustering"
+output: html_document
+---
+
+
+```{r echo=FALSE, message=FALSE}
+options(warn = -1) 
+```
+
+The authors of this work are:
+
+* Ion Bueno Ulacia, 100364530
+* Daniel Martín Cruz, 100384121
+
+
+We will start by importing the libraries we will need for the development of this project. These libraries are `BayesLCA` for the analysis and `tidyverse` for the dataset manipulation.
+
+```{r message=FALSE}
+library(BayesLCA)
+library(tidyverse)
+```
+
+
+## Description of the data set
+
+This dataset was submitted by the *Teaching of Statistics in the Health Sciencies (TSHS)* to Kaggle and can be found in this [link](https://www.kaggle.com/omnamahshivai/surgical-dataset-binary-classification). We can found information about surgeries, here is a summary of the columns:
+
+```{r}
+surgery = read.csv('Surgical-deepnet.csv')
+attach(surgery)
+head(surgery)
+```
+
+In this project, the technique chosen to practice is *Bayesian Clustering*. That is why we will remove all the non-binary variables from this dataset.
+
+```{r}
+surgery = surgery %>% select(gender, baseline_cancer, baseline_cvd, baseline_dementia,
+                             baseline_diabetes, baseline_digestive, baseline_osteoart,
+                             baseline_psych,  baseline_pulmonary, mort30, complication)
+```
+
+
+By doing this we keep:
+
+- **gender:** in the data dictionary provided by the TSHS, we have that $gender=1$ corresponds to male and $gender=2$ corresponds to female. In the dataset we observe that this variable only takes 0 and 1 as values. We will assume that $gender=0$ corresponds to male and $gender=1$ corresponds to female gender.
+- **baseline_disease:** indicates the presence of the disease in person being operated.
+- **mort30:** 30-day mortality.
+- **complication:** in-Hospital complication.
+
+
+## Analysis
+
+It is always advisable to start by showing some visualization before diving into the analysis.
+
+```{r}
+par(mfrow=c(3,4))
+plot(surgery$gender)
+plot(surgery$baseline_cancer)
+plot(surgery$baseline_cvd)
+plot(surgery$baseline_dementia)
+plot(surgery$baseline_diabetes)
+plot(surgery$baseline_digestive)
+plot(surgery$baseline_osteoart)
+plot(surgery$baseline_psych)
+plot(surgery$baseline_pulmonary)
+plot(surgery$mort30)
+plot(surgery$complication)
+```
+
+
+As it has been already explained, the variables present in this dataset are binary variables with 0 or 1 as values. In general all features are well balanced except dementia, mortality and In-Hospital complication that clearly have a dominant class (the absence of presence of this conditions).
+
+
+### EM Algorithm
+
+The first algorithm that will be tried here is the simplest possible estimation method that is the EM Algorithm. This only gives points estimates of the model parameters. We will assume 2 groups of operations. After a few tries, we think that a sensible number of restarts is 20 in order to find the optimal model.
+
+```{r}
+fit.EM=blca.em(surgery, 2,restarts=20)
+print(fit.EM)
+```
+
+The model trained `fit.EM` has two attributes in order to get the class probabilities and the item probabilities according to the estimation. 
+
+```{r}
+fit.EM$classprob
+fit.EM$itemprob
+```
+
+Let us also show the estimates in a visual way:
+
+```{r}
+plot(fit.EM)
+```
+
+With the information that has been shown, we see a considerable higher estimation of samples in group 1 being a clear differentiation between groups due to a considerable gap in the values of variables 1, 3 and 7.
+
+
+### Gibbs sampling algorithm
+
+After the *EM* algorithm, we are also going to try *Gibbs* sampling algorithm:
+
+```{r}
+fit.GS=blca(surgery, 2, method = "gibbs", iter=100)
+print(fit.GS)
+```
+
+
+In terms of class probability with the estimation the model `fit.GS` did, we observe very similar values in this case.
+
+The main difference when trying this method is the huge increase in the execution, with our computation power we even had to reduce the number of iterations with the attribute `iter`. On the other hand, it allows us to know the posterior standard deviation estimates. Given this, we are capable now of plotting the density estimates for the model parameters. With the attribute `which` we can select if we want the item probabilities conditional on class membership:
+
+```{r}
+par(mfrow = c(3, 2))
+plot(fit.GS,which=3)
+```
+
+
+Or the class probabilities
+
+```{r}
+par(mfrow = c(1, 1))
+plot(fit.GS,which=4)
+```
+
+As we said, similar values than in the *EM* case.
+
+
+### Variational Bayes
+
+In this last part of the analysis, we will check the performance of the *Variational Bayes* method which basically consists in approximation the posterior distribution with a variational distribution, adjusting parameters using a mixture of *dirichlet*, *beta* and *multinomial* distributions. The goal is reducing Kullback-Leibler divergence between the posterior and the variational approximation.
+
+```{r}
+fit.VB=blca(surgery, 2, method = "vb")
+print(fit.VB)
+```
+
+Luckily for us, the execution time is much smaller now, comparing it with the *Gibbs* case.
+
+
+```{r}
+fit.VB$itemprob
+fit.VB$classprob
+```
+
+In terms of item and class probabilities, the results obtained are pretty much the same than in the previous cases.
+
+
+We will now plot the density estimates for the item probabilities:
+
+```{r}
+par(mfrow = c(3,2))
+plot(fit.VB,which=3)
+```
+
+
+In this item probabilities we don't observe much difference either. Let us take a look at the class probabilities:
+
+
+```{r}
+par(mfrow = c(1,1))
+plot(fit.VB,which=4)
+```
+
+
+The main appreciable difference in this case is that we now see a bigger standard deviation in these probabilities.
+
+
+
+## Conclusion
+
+We studied three different methods for performing bayesian clustering that may be useful as a first step in some data analytics problems which may be present to us in the future. 
+
+A good practice would be using the variational algorithm in a first place in order to be able to try different attributes in a reduced time. Then, we can explore other methods to compare the results.
+
+
+
+
+
+
+
+
+
+

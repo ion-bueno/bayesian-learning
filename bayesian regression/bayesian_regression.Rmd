@@ -1,0 +1,366 @@
+---
+title: "Bayesian regression or GLMs"
+output: html_document
+---
+
+
+The authors of this work are:
+
+* Ion Bueno Ulacia, 100364530
+* Daniel Martín Cruz, 100384121
+
+
+
+
+## a) Description of the data set
+
+The used dataset can be downloaded from Kaggle in the following link: https://www.kaggle.com/prathamtripathi/regression-with-neural-networking.
+
+The goal is predicting the **strength of concrete** per kilo Newton using the following variables:
+
+* **Cement**: amount of cement.
+* **Blast Furnace Slag**: slag produced in blast furnace.
+* **Fly Ash**: amount of ash produced.
+* **Water**: amount of water required.
+* **Super-plasticizer**: rigidity of cement after drying.
+* **Coarse Aggregate**: the coarse nature of the cement particles.
+* **Fine Aggregate**: fineness of the cement.
+* **Age**: time before it needs repairing.
+
+```{r message=FALSE}
+cement <- read.csv("concrete_data.csv")
+colnames(cement)[1] <- "cement"
+colnames(cement)[2] <- "blast_furnace_slag"
+colnames(cement)[3] <- "fly_ash"
+colnames(cement)[4] <- "water"
+colnames(cement)[5] <- "superplasticizer"
+colnames(cement)[6] <- "coarse_aggregate"
+colnames(cement)[7] <- "fine_aggregate"
+colnames(cement)[8] <- "age"
+colnames(cement)[9] <- "strength"
+attach(cement)
+```
+
+The dataset is composed by **1030** samples, **8** quantitative continuous variables and the target, which is also quantitative continuous.
+
+```{r}
+dim(cement)
+```
+
+
+## b) Frequentist analysis
+
+We can obtain a scatterplot matrix to visualize the data.
+
+```{r}
+pairs(cement)
+```
+
+At first instance, it does not seem that there is any strong correlation between the variables. For this reason, the multiple linear models uses all the available attributes to predict *strength*. We want to estimate the coefficients $\beta$ and the residual variance $\sigma^2$ maximizing the likelihood function $f(y|\beta, \sigma^2)$.
+
+```{r}
+freq_reg <- lm(strength ~ ., data = cement)
+summary(freq_reg)
+```
+
+As we can see, all the variables except the calculated intercept are relevant for the prediction with a level of significance of equal to 5%. Mention also *coarse_aggregate* and *fine_aggregate* which are in the limit.
+
+In addition to that, we can perform a test to see if the predictors are significantly different from zero.
+
+```{r}
+confint(freq_reg, level=.95)
+```
+
+As expected, only the intercept and the variables *coarse_aggregate* and *fine_aggregate* contain zero in the confidence interval. For this reason, we are going to perform a stepwise selection removing predictors with BIC as criteria in order to see if the performance can improve.
+
+```{r}
+freq_reg_filtered <- MASS::stepAIC(freq_reg, direction = "backward", k = log(nrow(cement)))
+summary(freq_reg_filtered)
+```
+
+Looking into the final results, we can see the predictors *coarse_aggregate* and *fine_aggregate* have been removed from the model getting a best score in terms of BIC. Mention how not using these variables causes that the intercept becomes significant.
+
+In next cell the obtained BIC scores of both models are printed.
+
+```{r}
+extractAIC(freq_reg, k = log(nrow(cement)))[2]
+extractAIC(freq_reg_filtered, k = log(nrow(cement)))[2]
+```
+
+As commented, the model resulted from the stepwise process obtains a smaller BIC value, what means it overcomes the original model.
+
+We can compare predicted with observed values.
+
+```{r}
+plot(strength, predict(freq_reg_filtered), xlab = "Target", ylab = "Predicted")
+abline(0, 1, col = 2, lwd = 2)
+```
+
+The straight red line represents the perfect result, in which the predicted value match with the target. As we can see, the points are close around it, so we could that say the model is performing well.
+
+
+
+
+## c) Bayesian analysis
+
+In a Bayesian analysis the data are fixed and the model parameters behave as random variables. It is employed the Bayes Theorem to inference on the parameters, which are the same as before, $\beta$ and $\sigma^2$. The posterior distribution is defined as:
+$$f(\beta, \sigma^2 | y) \propto f(y|\beta, \sigma^2) f(\beta, \sigma^2)$$
+
+We have to assume a prior distribution $f(y|\beta, \sigma^2)$. At first instance we are going to use a **non-informative** prior distribution and then we tried a **informative** one.
+
+
+### Non-informative prior distribution
+
+We are going to use the *MCMCglmm* R package, which has as default a normal prior for the $\beta$ coefficients:
+$$\beta \sim N(m, V)$$
+with $m=0$ and $V = 10^{10} I$. The variance follows an inverse gamma distribution:
+$$\sigma^2 \sim IG(\frac{a}{2}, \frac{b}{2})$$
+
+```{r message=FALSE}
+library(MCMCglmm)
+```
+
+With this method we implement a Markov Chain Monte Carlo (MCMC) algorithm to obtain samples from the posterior distribution.
+
+```{r message=FALSE}
+bayes_reg_no_inf <- MCMCglmm(strength ~ 
+                               cement + 
+                               blast_furnace_slag +
+                               fly_ash + 
+                               water +
+                               superplasticizer +
+                               coarse_aggregate + 
+                               fine_aggregate +
+                               age, 
+                             data = cement, verbose = FALSE)
+summary(bayes_reg_no_inf)
+```
+
+At first instance we can see how the influence of the predictors in the response are very similar respect to the multiple linear regression. For this reason we removed the same variables than before, *coarse_aggregate* and *fine_aggregate*. This process will be better explained and discussed in section d).
+
+
+```{r message=FALSE}
+bayes_reg_no_inf_filtered <- MCMCglmm(strength ~ 
+                               cement + 
+                               blast_furnace_slag +
+                               fly_ash + 
+                               water +
+                               superplasticizer +
+                               age, 
+                             data = cement, verbose = FALSE)
+summary(bayes_reg_no_inf_filtered)
+```
+```{r}
+c(bayes_reg_no_inf$DIC, bayes_reg_no_inf_filtered$DIC)
+```
+
+After several executions, we have seen that the DIC can improve or not, the difference with the previous model is minimum. Mention the results are not always the same due to the randomization introduced by the Markov Chain Monte Carlo sampling.
+
+The $\beta$ parameters can be obtained using the posterior mean, which are the expected value the posterior distribution.
+
+```{r}
+beta_bayes_no_inf <- bayes_reg_no_inf_filtered$Sol
+beta_reg <- freq_reg_filtered$coefficients
+colMeans(beta_bayes_no_inf)
+beta_reg
+```
+
+As we can see, the parameters are very close.
+
+In a Bayesian model, the Highest Posterior Density (HPD) intervals are the shortest interval of given probability for the posterior distribution. In next cell the confidence intervals of both models are shown:
+
+```{r}
+HPDinterval(beta_bayes_no_inf, level = .95)
+confint(freq_reg_filtered, level = .95)
+```
+
+As before, the results are almost the same. Last point to check is the estimated $\sigma^2$. 
+
+```{r}
+colMeans(bayes_reg_no_inf_filtered$VCV)
+mean(freq_reg_filtered$residuals^2)
+```
+
+The posterior mean of $\sigma^2$ is close to the classical mean squared residuals.
+
+We can also compare the prediction intervals of both models.
+
+```{r warning=FALSE}
+predict(bayes_reg_no_inf_filtered, interval="prediction")[1:5, ]
+predict(freq_reg_filtered, interval="prediction")[1:5, ]
+```
+Which are also almost equal. If we plot the points it can be seen how the differences in the predictions are minimum.
+
+```{r}
+plot(strength, predict(bayes_reg_no_inf_filtered), xlab = "Target", ylab = "Predicted", col = 3, cex = 1)
+points(strength, predict(freq_reg_filtered), col = 4, cex = 0.5)
+abline(0, 1, col = 2, lwd = 2)
+```
+
+### Informative prior distribution
+
+We can introduce a more informative prior on the $\beta$ coefficients constraining their magnitude a priori.
+$$\beta \sim N(0, \frac{1}{\lambda}I)$$
+
+We selected $\lambda=0.05$.
+
+```{r message=FALSE}
+p <- ncol(cement) - 1
+lambda <- 0.05
+prior <- list(B=list(mu=rep(0,p+1),V=diag(1/lambda,p+1)))
+bayes_reg_inf <- MCMCglmm(strength ~ 
+                               cement + 
+                               blast_furnace_slag +
+                               fly_ash + 
+                               water +
+                               superplasticizer +
+                               coarse_aggregate + 
+                               fine_aggregate +
+                               age,
+                          data = cement, prior = prior, verbose = FALSE)
+summary(bayes_reg_inf)
+```
+
+If we compare the obtained DIC for models using non-informative and informative prior distributions.
+
+```{r}
+c(bayes_reg_no_inf_filtered$DIC, bayes_reg_inf$DIC)
+```
+
+The option introducing prior information obtains a better score.
+
+As before, we can compare the results respect the frequentist ones. The used variables are different, so it does not make a lot of sense looking into the estimated $\beta$ coefficients or the confidence intervals of these ones.
+
+However, we can still check the estimated residual variance $\sigma^2$.
+
+```{r}
+colMeans(bayes_reg_inf$VCV)
+mean(freq_reg_filtered$residuals^2)
+```
+As before, the values are very close.
+
+Looking into the prediction intervals of the first five points.
+
+```{r warning=FALSE}
+predict(bayes_reg_inf, interval="prediction")[1:5, ]
+predict(freq_reg_filtered, interval="prediction")[1:5, ]
+```
+
+The obtained results are almost identical. We can plot the predicted points by the multiple linear regression and the bayesian regression model.
+
+```{r}
+plot(strength, predict(bayes_reg_inf), xlab = "Target", ylab = "Predicted", col = 3, cex = 1)
+points(strength, predict(freq_reg_filtered), col = 4, cex = 0.5)
+abline(0, 1, col = 2, lwd = 2)
+```
+
+As expected, the predictions are almost the same. Nevertheless, to mention that more differences can be appreciated using prior information, the points do not match so well as in the previous case.
+
+
+
+## d) Variable selection
+
+The decision to use or not a certain variable in the model can be carried out using DIC as criteria. It is defined as:
+$$\text{DIC} = \bar{D} + 2p_D$$
+
+The $\bar{D}$ is the posterior mean deviance, which means how far the model is for a perfect fit (overfitted). The parameter $p_D$ is the effective number of parameters in the Bayesian context. If the number of parameters in a model increases, $\bar{D}$ is going to decrease, so $p_D$ term compensates this effect by favoring models with a smaller number of parameters. Lower values of the DIC indicate that the model is fitting well the problem.
+
+We have already explained a variable selection process using DIC in the non-informative model. When removing the attributes *coarse_aggregate* and *fine_aggregate*, the value is reduced.
+
+```{r}
+c(bayes_reg_no_inf$DIC, bayes_reg_no_inf_filtered$DIC)
+```
+
+This selection is motivated by the significance of the predictors into the response. Same process is going to be carried in the informative model, in order to see if we can obtain a better performance.
+
+```{r}
+summary(bayes_reg_inf)
+```
+
+In this case *coarse_aggregate* and *fine_aggregate* are more relevant than in the non-informative model. However, the intercept remains being non significant, so we are going to remove it.
+
+```{r message=FALSE}
+p <- ncol(cement) - 2
+lambda <- 0.05
+prior <- list(B=list(mu=rep(0,p+1),V=diag(1/lambda,p+1)))
+bayes_reg_inf_filtered <- MCMCglmm(strength ~ -1 +
+                               cement + 
+                               blast_furnace_slag +
+                               fly_ash + 
+                               water +
+                               superplasticizer +
+                               coarse_aggregate + 
+                               fine_aggregate +
+                               age,
+                          data = cement, prior = prior, verbose = FALSE)
+summary(bayes_reg_inf_filtered)
+```
+
+As with the case of non-informative prior distribution, the DIC can improve or not in each execution due to the randomization introduced by the Markov Chain Monte Carlo sampling. The difference is minimum respect the two models.
+
+```{r}
+c(bayes_reg_inf$DIC, bayes_reg_inf_filtered$DIC)
+```
+
+We can continue removing other attributes, for example *fine_aggregate* which is one of the less significant.
+
+```{r message=FALSE}
+p <- ncol(cement) - 3
+lambda <- 0.05
+prior <- list(B=list(mu=rep(0,p+1),V=diag(1/lambda,p+1)))
+bayes_reg_inf_filtered2 <- MCMCglmm(strength ~ -1 +
+                               cement + 
+                               blast_furnace_slag +
+                               fly_ash + 
+                               water +
+                               superplasticizer +
+                               coarse_aggregate + 
+                               age,
+                          data = cement, prior = prior, verbose = FALSE)
+bayes_reg_inf_filtered2$DIC
+```
+
+But the result is worse. If we keep the intercept and remove this variable.
+
+```{r}
+p <- ncol(cement) - 2
+lambda <- 0.05
+prior <- list(B=list(mu=rep(0,p+1),V=diag(1/lambda,p+1)))
+bayes_reg_inf_filtered3 <- MCMCglmm(strength ~
+                               cement + 
+                               blast_furnace_slag +
+                               fly_ash + 
+                               water +
+                               superplasticizer +
+                               coarse_aggregate + 
+                               age,
+                          data = cement, prior = prior, verbose = FALSE)
+bayes_reg_inf_filtered3$DIC
+```
+
+The results improves but it is still worse than the previous one in which we only removed the intercept.
+
+```{r}
+c(bayes_reg_no_inf$DIC, bayes_reg_no_inf_filtered$DIC,
+  bayes_reg_inf$DIC, bayes_reg_inf_filtered$DIC, 
+  bayes_reg_inf_filtered2$DIC, bayes_reg_inf_filtered3$DIC)
+```
+
+As we have commented, the best model in terms of DIC criteria is the one with informative prior distribution and using all the available predictors. Excluding the intercept results in a minimum difference respect the DIC.
+
+
+
+## e) Conclusions
+
+The Bayesian approach in this problem has successfully obtained the same results than the multiple linear regression. Introducing prior information distributions has resulted in a better performance. This lead us to think that knowing more about the data and how it may be distributed has a direct effect in how well our model is going to behave.
+
+In addition to that, the DIC criteria allowed us to perform a selection between models taking into account how well they fit and avoiding the overfitting which may be caused by using a lot of parameters. Mention how the significance of the variables have been different in the three approaches: frequentist analysis and using non-informative and informative prior distributions in the bayesian analysis. For this reason, the variable selection should be carried out individually and evaluating the DIC each time a predictors is added or removed, since the significance of the rest change, as we have seen. 
+
+Finally, it is also important to consider the randomization introduced by the Markov Chain Monte Carlo sampling in each execution when we want to compare models' performance. We can fix the seed in order to get deterministic results.
+
+
+
+
+
+
+
