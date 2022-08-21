@@ -1,4 +1,4 @@
-# Bayesian learning
+# Applications of bayesian learning
 
 Three applications are developed using bayesian learning:
 
